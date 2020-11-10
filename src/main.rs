@@ -52,14 +52,43 @@ fn init_map(coins: &Vec<i32>) -> HashMap<&i32, i32> {
     usage_map
 }
 
+trait Measurable {
+    fn measure(&self) -> i32;
+}
+
+trait Name {
+    fn name(&self) -> &str;
+}
+
+impl Measurable for &str {
+    fn measure(&self) -> i32 {
+        self.len() as i32
+    }
+}
+
+impl Name for &str {
+    fn name(&self) -> &str {
+        self
+    }
+}
+
+fn print_measures(measures: &[(impl Measurable + Name)]) {
+    for m in measures {
+        println!("{} -> {}", m.name(), m.measure());
+    }
+}
+
 fn main() {
+
+    let strings = vec!["hello", "this", "are", "just", "some", "strings"];
+    print_measures(&strings);
 
     let coins = vec![1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
 
     let mut rng = rand::thread_rng();
 
     let mut sum = 0;
-    let count = 1000;
+    let count = 100;
 
     let mut usage_map = init_map(&coins);
 
@@ -92,6 +121,7 @@ fn main() {
         println!("used {}: {} times", key, value as f32 / sum as f32 * 100.0)
     }
 
+    println!("{}", "hello world!");
     //println!("paying {} with:{}", random_number, s);
 
 }
