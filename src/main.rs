@@ -2,24 +2,8 @@ use rand::Rng;
 
 use std::collections::HashMap;
 
-fn can_pay(coins: &Vec<i32>, cents: i32) -> bool {
-
-    let mut res = cents;
-
-    for coin in coins.iter().rev() {
-
-        if res - coin >= 0 {
-            res -= coin;
-        }
-
-        if res == 0 {
-            return true;
-        }
-
-    }
-
-    false
-}
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicI32;
 
 fn get_pay_combination(coins: &Vec<i32>, cents: i32) -> Vec<i32> {
     let mut left = cents;
@@ -40,7 +24,7 @@ fn get_pay_combination(coins: &Vec<i32>, cents: i32) -> Vec<i32> {
     panic!()
 }
 
-fn init_map(coins: &Vec<i32>) -> HashMap<&i32, i32> {
+fn init_map(coins: Vec<i32>) -> HashMap<i32, i32> {
     let mut usage_map = HashMap::new();
 
     for coin in coins {
@@ -52,76 +36,81 @@ fn init_map(coins: &Vec<i32>) -> HashMap<&i32, i32> {
     usage_map
 }
 
-trait Measurable {
-    fn measure(&self) -> i32;
-}
-
-trait Name {
-    fn name(&self) -> &str;
-}
-
-impl Measurable for &str {
-    fn measure(&self) -> i32 {
-        self.len() as i32
-    }
-}
-
-impl Name for &str {
-    fn name(&self) -> &str {
-        self
-    }
-}
-
-fn print_measures(measures: &[(impl Measurable + Name)]) {
-    for m in measures {
-        println!("{} -> {}", m.name(), m.measure());
-    }
-}
-
 fn main() {
 
-    let strings = vec!["hello", "this", "are", "just", "some", "strings"];
-    print_measures(&strings);
-
-    let coins = vec![1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
-
-    let mut rng = rand::thread_rng();
-
-    let mut sum = 0;
+    //let coins: Vec<i32> = vec![1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
     let count = 100;
+    let num_threads = 8;
+    let sum = num_threads * count;
+    let max_money = 10000;
+    let div = max_money / num_threads;
 
-    let mut usage_map = init_map(&coins);
+    assert!(max_money % num_threads == 0);
 
-    for max_random_number in 2..100 * 100 {
-        for _ in 0..count {
-            let random_number = rng.gen_range(1, max_random_number);
-    
-            let res = get_pay_combination(&coins, random_number);
-            //let s: String = res.iter().map(|n| n.to_string() + ", ").collect();
-            sum += res.len();
-    
-            for coin in res {
-                *usage_map.get_mut(&coin).unwrap() += 1;
-            }
-        }
+    let ranges = Arc::new(Mutex::new(Vec::new()));
+    for i in 0..num_threads {
+        let start = 2 + i * div;
+        let end = (i + 1) * div + 1;
+        ranges.lock().unwrap().push((start, end));
+        println!("({}, {})", start, end);
     }
 
-    println!("average num coins for paying: {}", sum as f32 / count as f32);
+    let mut threads = vec![];
 
-    // for entry in usage_map.iter() {
-    //     let (key, value) = entry;
-    //     println!("used {}: {} times", key, *value as f32 / sum as f32 * 100.0);
-    // }
+    const COINS: [i32; 16] = [1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
+    let result_map = Arc::new(Mutex::new(init_map(COINS.to_vec())));
+    
+    for i in 0..num_threads {
+        let cloned_result_map = Arc::clone(&result_map);
+        let range = ranges.clone();
 
-    let mut v: Vec<_> = usage_map.into_iter().collect();
-    v.sort_by(|x, y| x.0.cmp(&y.0));
+        threads.push(std::thread::spawn(move || {
+            let mut random = rand::thread_rng();
+            
+            let range = range.lock().unwrap()[i as usize];
+            let coins_vec = COINS.to_vec();
+            let cloned = coins_vec.clone();
+            let mut temp_usage_map = init_map(coins_vec);
+            
+            for _ in 0..count {
+                for max_random_number in range.0..range.1 {
+                    let random_number = random.gen_range(1, max_random_number);
+                    let res = get_pay_combination(&cloned, random_number);
+
+                    for coin in res {
+                        *temp_usage_map.get_mut(&coin).unwrap() += 1;
+                    }
+                }
+            }
+
+            let mut map = cloned_result_map.lock().unwrap();
+            for pair in temp_usage_map.into_iter() {
+                *map.get_mut(&pair.0).unwrap() += pair.1;
+            }
+        }));
+    }
+
+    for thread in threads {
+        thread.join().unwrap();        
+    }
+
+    let mut map = HashMap::new();
+
+    for i in result_map.lock().unwrap().iter() {
+        let (k, v) = i;
+        map.insert(*k, *v);
+    }
+
+    let mut v: Vec<_> = map.into_iter().collect();
+    v.sort();
+
+    let mut s = 0;
 
     for pair in v {
-        let (key, value) = pair;
-        println!("used {}: {} times", key, value as f32 / sum as f32 * 100.0)
+        println!("{} -> {}", pair.0, pair.1 as f32);
+        s += pair.1;
     }
 
-    println!("{}", "hello world!");
-    //println!("paying {} with:{}", random_number, s);
+    println!("{}", s);
 
 }
