@@ -96,11 +96,9 @@ fn create_thread(index: i32, count: i32, num_parts: i32, tx_ref: Sender<(i32, Ha
 
 fn main() {
 
-    
-
     let count = 100;
     let num_threads = 8;
-    let max_money = 10000;
+    let max_money = 1000;
     let num_parts = max_money / num_threads;
 
     let mut threads = Vec::with_capacity(num_threads as usize);
