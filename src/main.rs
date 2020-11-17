@@ -1,13 +1,11 @@
 use rand::Rng;
 
 use std::collections::HashMap;
-
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::AtomicI32;
+use std::sync::mpsc::*;
 
-fn get_pay_combination(coins: &Vec<i32>, cents: i32) -> Vec<i32> {
+fn get_pay_combination(coins: &[i32], cents: i32) -> Option<Vec<i32>> {
     let mut left = cents;
-
     let mut res = Vec::<i32>::new();
 
     for coin in coins.iter().rev() {
@@ -17,78 +15,91 @@ fn get_pay_combination(coins: &Vec<i32>, cents: i32) -> Vec<i32> {
         }
 
         if left == 0 {
-            return res;
+            return Some(res);
         }
     }
 
-    panic!()
+    None
 }
 
-fn init_map(coins: Vec<i32>) -> HashMap<i32, i32> {
+fn init_map(coins: &[i32]) -> HashMap<i32, i32> {
     let mut usage_map = HashMap::new();
 
     for coin in coins {
-        if !usage_map.contains_key(&coin) {
-            usage_map.insert(coin, 0);
+        if !usage_map.contains_key(coin) {
+            usage_map.insert(*coin, 0);
         }
     }
 
     usage_map
 }
 
-fn main() {
+fn get_range(parts: i32, i: i32) -> (i32, i32) {
+    (2 + i * parts, (i + 1) * parts + 1)
+}
 
-    //let coins: Vec<i32> = vec![1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
-    let count = 100;
-    let num_threads = 8;
-    let sum = num_threads * count;
-    let max_money = 10000;
-    let div = max_money / num_threads;
+const COINS: [i32; 16] = [1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
 
-    assert!(max_money % num_threads == 0);
+fn create_thread(index: i32, count: i32, num_parts: i32, tx_ref: Sender<(i32, HashMap<i32, i32>)>) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut random = rand::thread_rng();
+        
+        let range = get_range(num_parts, index);
+        let mut temp_usage_map = init_map(&COINS);
+        
+        for _ in 0..count {
+            for max_random_number in range.0..range.1 {
+                let random_number = random.gen_range(1, max_random_number);
+                let res = get_pay_combination(&COINS, random_number).unwrap();
 
-    let ranges = Arc::new(Mutex::new(Vec::new()));
-    for i in 0..num_threads {
-        let start = 2 + i * div;
-        let end = (i + 1) * div + 1;
-        ranges.lock().unwrap().push((start, end));
-        println!("({}, {})", start, end);
-    }
-
-    let mut threads = vec![];
-
-    const COINS: [i32; 16] = [1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
-    let result_map = Arc::new(Mutex::new(init_map(COINS.to_vec())));
-    
-    for i in 0..num_threads {
-        let cloned_result_map = Arc::clone(&result_map);
-        let range = ranges.clone();
-
-        threads.push(std::thread::spawn(move || {
-            let mut random = rand::thread_rng();
-            
-            let range = range.lock().unwrap()[i as usize];
-            let coins_vec = COINS.to_vec();
-            let cloned = coins_vec.clone();
-            let mut temp_usage_map = init_map(coins_vec);
-            
-            for _ in 0..count {
-                for max_random_number in range.0..range.1 {
-                    let random_number = random.gen_range(1, max_random_number);
-                    let res = get_pay_combination(&cloned, random_number);
-
-                    for coin in res {
-                        *temp_usage_map.get_mut(&coin).unwrap() += 1;
-                    }
+                for coin in res {
+                    *temp_usage_map.get_mut(&coin).unwrap() += 1;
                 }
             }
+        }
 
-            let mut map = cloned_result_map.lock().unwrap();
-            for pair in temp_usage_map.into_iter() {
-                *map.get_mut(&pair.0).unwrap() += pair.1;
-            }
-        }));
+        //std::thread::sleep(std::time::Duration::from_millis(500 * index as u64));
+
+        println!("sending {}", index);
+        tx_ref.send((index, temp_usage_map)).unwrap();
+    })
+}
+
+fn main() {
+
+    
+
+    let count = 100;
+    let num_threads = 8;
+    let max_money = 10000;
+    let num_parts = max_money / num_threads;
+
+    let mut threads = Vec::with_capacity(num_threads as usize);
+
+    let map = init_map(&COINS.to_vec());
+    let result_map = Arc::new(Mutex::new(map));
+    let (tx, rx) = channel();
+    
+    for i in 0..num_threads {
+        let tx_ref = Sender::clone(&tx);
+
+        threads.push(create_thread(i, count, num_parts, tx_ref));
     }
+
+    let result_map_ref = result_map.clone();
+
+    std::thread::spawn(move || {
+        for recv_data in rx {
+
+            let (thread_id, map): (i32, HashMap<i32, i32>) = recv_data;
+
+            println!("receiving {}", thread_id);
+            for pair in map {
+                let (coin, coin_count) = pair;
+                *result_map_ref.lock().unwrap().get_mut(&coin).unwrap() += coin_count;
+            }
+        }
+    });
 
     for thread in threads {
         thread.join().unwrap();        
