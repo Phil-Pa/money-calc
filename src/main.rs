@@ -1,8 +1,32 @@
-use rand::Rng;
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::*;
+
+trait EndsWith {
+    fn ends_with(&self, n: i32) -> bool;
+    fn ends_with_one_of(&self, args: &[i32]) -> bool;
+}
+
+impl EndsWith for i32 {
+    fn ends_with(&self, n: i32) -> bool {
+
+        debug_assert!(n < 100);
+
+        if n > 10 {
+            return self % 100 == n;
+        }
+
+        self % 10 == n
+    }
+    fn ends_with_one_of(&self, args: &[i32]) -> bool {
+        for arg in args {
+            if self.ends_with(*arg) {
+                return true
+            }
+        }
+        false
+    }
+}
 
 fn get_pay_combination(coins: &[i32], cents: i32) -> Option<Vec<i32>> {
     let mut left = cents;
@@ -35,22 +59,27 @@ fn init_map(coins: &[i32]) -> HashMap<i32, i32> {
 }
 
 fn get_range(parts: i32, i: i32) -> (i32, i32) {
-    (2 + i * parts, (i + 1) * parts + 1)
+    let res = (2 + i * parts, (i + 1) * parts + 1);
+    println!("range ({}, {})", res.0, res.1);
+    res
 }
 
 const COINS: [i32; 16] = [1, 2, 2, 5, 10, 20, 20, 50, 100, 200, 200, 5 * 100, 10 * 100, 20 * 100, 20 * 100, 50 * 100];
 
 fn create_thread(index: i32, count: i32, num_parts: i32, tx_ref: Sender<(i32, HashMap<i32, i32>)>) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let mut random = rand::thread_rng();
-        
+    std::thread::spawn(move || {        
         let range = get_range(num_parts, index);
         let mut temp_usage_map = init_map(&COINS);
         
         for _ in 0..count {
             for max_random_number in range.0..range.1 {
-                let random_number = random.gen_range(1, max_random_number);
-                let res = get_pay_combination(&COINS, random_number).unwrap();
+
+                if max_random_number.ends_with_one_of(&[5, 9]) {
+                    continue;
+                }
+
+                let random_number = max_random_number;
+                let res = get_pay_combination(&COINS, random_number).expect("should be payable");
 
                 for coin in res {
                     *temp_usage_map.get_mut(&coin).unwrap() += 1;
@@ -105,23 +134,38 @@ fn main() {
         thread.join().unwrap();        
     }
 
-    let mut map = HashMap::new();
+    print_results(result_map);
+}
 
-    for i in result_map.lock().unwrap().iter() {
-        let (k, v) = i;
-        map.insert(*k, *v);
+fn print_results(map: Arc<Mutex<HashMap<i32, i32>>>) {
+    let mut final_map = HashMap::new();
+
+    for pair in map.lock().unwrap().iter() {
+        let (coin, coin_count) = pair;
+        final_map.insert(*coin, *coin_count);
     }
 
-    let mut v: Vec<_> = map.into_iter().collect();
-    v.sort();
+    let mut pairs: Vec<_> = final_map.into_iter().collect();
+    pairs.sort();
 
-    let mut s = 0;
+    let mut sum = 0;
 
-    for pair in v {
-        println!("{} -> {}", pair.0, pair.1 as f32);
-        s += pair.1;
+    for pair in pairs.iter() {
+        let (coin, coin_count) = pair;
+        println!("{} -> {}", coin, *coin_count);
+        sum += coin_count;
     }
 
-    println!("{}", s);
+    println!("{}", sum);
 
+    let mut sum_percent = 0f32;
+
+    for pair in pairs.iter() {
+        let (coin, coin_count) = pair;
+        let percent = *coin_count as f32 / sum as f32 * 100f32;
+        println!("{} -> {}", coin, percent);
+        sum_percent += percent;
+    }
+
+    println!("sum percent: {}", sum_percent);
 }
